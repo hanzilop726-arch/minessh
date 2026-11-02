@@ -75,9 +75,9 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="34dp"
-                    android:text="Your servers,\none tap away."
+                    android:text="SSH connections"
                     android:textColor="#F3F4EF"
-                    android:textSize="30sp"
+                    android:textSize="28sp"
                     android:textStyle="bold"
                     android:lineSpacingExtra="1dp" />
 
@@ -85,7 +85,7 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="9dp"
-                    android:text="Secure shell connections, kept in one place."
+                    android:text="Your saved servers"
                     android:textColor="#B7C3BC"
                     android:textSize="14sp" />
             </LinearLayout>

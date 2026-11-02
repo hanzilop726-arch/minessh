@@ -80,6 +80,14 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".app.activities.SshTerminalActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:exported="false"
+            android:label="@string/application_name"
+            android:theme="@style/Theme.TermuxActivity.DayNight.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
         <activity-alias
             android:name=".HomeActivity"
             android:exported="true"

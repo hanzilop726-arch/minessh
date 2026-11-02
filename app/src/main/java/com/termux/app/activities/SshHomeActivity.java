@@ -4,6 +4,7 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -13,6 +14,7 @@ import android.view.Window;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -21,7 +23,6 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import com.google.android.material.card.MaterialCardView;
 import com.termux.R;
-import com.termux.app.TermuxActivity;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -32,6 +33,13 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 
 public final class SshHomeActivity extends AppCompatActivity {
 
@@ -42,11 +50,13 @@ public final class SshHomeActivity extends AppCompatActivity {
 
     private static final String PREFERENCES = "minesssh_hosts";
     private static final String HOSTS_KEY = "hosts_json";
+    private static final int REQUEST_IMPORT_PRIVATE_KEY = 41;
     private final List<Host> hosts = new ArrayList<>();
     private LinearLayout hostsContainer;
     private TextView hostCount;
     private TextView emptyHosts;
     private EditText searchField;
+    private EditText pendingKeyPathField;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -239,14 +249,24 @@ public final class SshHomeActivity extends AppCompatActivity {
         EditText port = addField(form, "Port", existing == null ? "22" : String.valueOf(existing.port), InputType.TYPE_CLASS_NUMBER);
         EditText group = addField(form, "Group (optional)", existing == null ? "" : existing.group, InputType.TYPE_CLASS_TEXT);
         EditText keyPath = addField(form, "Private key path (optional)", existing == null ? "" : existing.keyPath, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        pendingKeyPathField = keyPath;
+        com.google.android.material.button.MaterialButton importKey = new com.google.android.material.button.MaterialButton(this);
+        importKey.setText("Import .pem private key");
+        importKey.setTextAllCaps(false);
+        importKey.setOnClickListener(view -> importPrivateKey());
+        form.addView(importKey, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
         CheckBox favorite = new CheckBox(this);
         favorite.setText("Add to favorites");
         favorite.setChecked(existing != null && existing.favorite);
         form.addView(favorite);
 
+        ScrollView formScroll = new ScrollView(this);
+        formScroll.setFillViewport(false);
+        formScroll.addView(form);
         AlertDialog dialog = new AlertDialog.Builder(this)
             .setTitle(existing == null ? "Add SSH host" : "Edit SSH host")
-            .setView(form)
+            .setView(formScroll)
             .setNegativeButton("Cancel", null)
             .setPositiveButton(existing == null ? "Save host" : "Save changes", null)
             .create();
@@ -289,6 +309,68 @@ public final class SshHomeActivity extends AppCompatActivity {
         dialog.show();
     }
 
+    private void importPrivateKey() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[] {
+            "application/x-pem-file", "application/octet-stream", "text/plain"
+        });
+        startActivityForResult(intent, REQUEST_IMPORT_PRIVATE_KEY);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_IMPORT_PRIVATE_KEY || resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        File importedKey = null;
+        try {
+            importedKey = copyPrivateKeyToAppStorage(data.getData());
+            if (pendingKeyPathField != null) pendingKeyPathField.setText(importedKey.getAbsolutePath());
+            Toast.makeText(this, "Private key imported securely", Toast.LENGTH_SHORT).show();
+        } catch (IOException exception) {
+            if (importedKey != null) importedKey.delete();
+            Toast.makeText(this, exception.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private File copyPrivateKeyToAppStorage(Uri keyUri) throws IOException {
+        File keyDirectory = new File(getFilesDir(), "ssh-keys");
+        if (!keyDirectory.exists() && !keyDirectory.mkdirs()) throw new IOException("Could not create private key storage");
+        File keyFile = new File(keyDirectory, "key-" + UUID.randomUUID() + ".pem");
+        try {
+            try (InputStream input = getContentResolver().openInputStream(keyUri);
+                 FileOutputStream output = new FileOutputStream(keyFile)) {
+                if (input == null) throw new IOException("Could not read the selected key file");
+                byte[] buffer = new byte[4096];
+                int totalBytes = 0;
+                int read;
+                while ((read = input.read(buffer)) != -1) {
+                    totalBytes += read;
+                    if (totalBytes > 1024 * 1024) throw new IOException("Private key file is larger than 1 MB");
+                    output.write(buffer, 0, read);
+                }
+            }
+            byte[] header = new byte[256];
+            int headerLength;
+            try (FileInputStream input = new FileInputStream(keyFile)) {
+                headerLength = input.read(header);
+            }
+            String headerText = new String(header, 0, Math.max(headerLength, 0), StandardCharsets.US_ASCII);
+            if (!headerText.contains("PRIVATE KEY-----"))
+                throw new IOException("Selected file is not a supported PEM/OpenSSH private key");
+
+            keyFile.setReadable(false, false);
+            keyFile.setWritable(false, false);
+            if (!keyFile.setReadable(true, true) || !keyFile.setWritable(true, true))
+                throw new IOException("Could not protect the imported private key");
+            return keyFile;
+        } catch (IOException exception) {
+            keyFile.delete();
+            throw exception;
+        }
+    }
+
     private EditText addField(LinearLayout parent, String hint, String value, int inputType) {
         EditText field = new EditText(this);
         field.setSingleLine(true);
@@ -327,7 +409,8 @@ public final class SshHomeActivity extends AppCompatActivity {
     }
 
     private void connect(Host host) {
-        Intent intent = new Intent(this, TermuxActivity.class);
+        Intent intent = new Intent(this, SshTerminalActivity.class);
+        intent.putExtra(SshTerminalActivity.EXTRA_HOST_NAME, TextUtils.isEmpty(host.name) ? host.address : host.name);
         intent.putExtra(EXTRA_SSH_HOST, host.address);
         intent.putExtra(EXTRA_SSH_USER, host.username);
         intent.putExtra(EXTRA_SSH_PORT, host.port);
