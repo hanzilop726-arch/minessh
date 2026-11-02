@@ -252,7 +252,7 @@ public final class SshHomeActivity extends AppCompatActivity {
         pendingKeyPathField = keyPath;
         com.google.android.material.button.MaterialButton importKey = new com.google.android.material.button.MaterialButton(this);
         importKey.setText("Import .pem private key");
-        importKey.setTextAllCaps(false);
+            importKey.setTransformationMethod(null);
         importKey.setOnClickListener(view -> importPrivateKey());
         form.addView(importKey, new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT, dp(48)));
