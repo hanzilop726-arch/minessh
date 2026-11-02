@@ -29,4 +29,18 @@ public class TermuxActivityTest {
             "https://example.com/#bar", "https://example.com/foo#bar");
     }
 
+    @Test
+    public void testSshCommandUsesHostDetailsAndQuotesKeyPath() {
+        String command = SshCommandUtils.buildCommand("admin", "192.0.2.10", 2222, "/home/user/ssh keys/id_ed25519");
+
+        Assert.assertTrue(command.contains("exec ssh -p 2222 -i '/home/user/ssh keys/id_ed25519' 'admin@192.0.2.10'"));
+    }
+
+    @Test
+    public void testSshCommandEscapesShellQuotesInKeyPath() {
+        String command = SshCommandUtils.buildCommand("admin", "example.com", 22, "/tmp/key'file");
+
+        Assert.assertTrue(command.contains("-i '/tmp/key'\\''file' 'admin@example.com'"));
+    }
+
 }
