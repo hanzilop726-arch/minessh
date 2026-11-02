@@ -41,6 +41,7 @@ import com.termux.shared.termux.TermuxConstants;
 import com.termux.shared.termux.TermuxConstants.TERMUX_APP.TERMUX_ACTIVITY;
 import com.termux.app.activities.HelpActivity;
 import com.termux.app.activities.SettingsActivity;
+import com.termux.app.activities.SshHomeActivity;
 import com.termux.shared.termux.crash.TermuxCrashUtils;
 import com.termux.shared.termux.settings.preferences.TermuxAppSharedPreferences;
 import com.termux.app.terminal.TermuxSessionsListViewController;
@@ -66,6 +67,7 @@ import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.viewpager.widget.ViewPager;
 
 import java.util.Arrays;
+import java.io.File;
 
 /**
  * A terminal emulator activity.
@@ -399,6 +401,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
                 TermuxInstaller.setupBootstrapIfNeeded(TermuxActivity.this, () -> {
                     if (mTermuxService == null) return; // Activity might have been destroyed.
                     try {
+                        if (isSshIntent(intent) && startSshSession(intent)) return;
                         boolean launchFailsafe = false;
                         if (intent != null && intent.getExtras() != null) {
                             launchFailsafe = intent.getExtras().getBoolean(TERMUX_ACTIVITY.EXTRA_FAILSAFE_SESSION, false);
@@ -416,7 +419,9 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             // If termux was started from launcher "New session" shortcut and activity is recreated,
             // then the original intent will be re-delivered, resulting in a new session being re-added
             // each time.
-            if (!mIsActivityRecreated && intent != null && Intent.ACTION_RUN.equals(intent.getAction())) {
+            if (isSshIntent(intent)) {
+                if (!startSshSession(intent)) mTermuxTerminalSessionActivityClient.addNewSession(false, null);
+            } else if (!mIsActivityRecreated && intent != null && Intent.ACTION_RUN.equals(intent.getAction())) {
                 // Android 7.1 app shortcut from res/xml/shortcuts.xml.
                 boolean isFailSafe = intent.getBooleanExtra(TERMUX_ACTIVITY.EXTRA_FAILSAFE_SESSION, false);
                 mTermuxTerminalSessionActivityClient.addNewSession(isFailSafe, null);
@@ -427,6 +432,49 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
         // Update the {@link TerminalSession} and {@link TerminalEmulator} clients.
         mTermuxService.setTermuxTerminalSessionClient(mTermuxTerminalSessionActivityClient);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (mTermuxService != null && isSshIntent(intent) && !startSshSession(intent))
+            mTermuxTerminalSessionActivityClient.addNewSession(false, null);
+    }
+
+    private boolean isSshIntent(Intent intent) {
+        return intent != null && intent.hasExtra(SshHomeActivity.EXTRA_SSH_HOST);
+    }
+
+    private boolean startSshSession(Intent intent) {
+        String host = intent.getStringExtra(SshHomeActivity.EXTRA_SSH_HOST);
+        String username = intent.getStringExtra(SshHomeActivity.EXTRA_SSH_USER);
+        int port = intent.getIntExtra(SshHomeActivity.EXTRA_SSH_PORT, 22);
+        String keyPath = intent.getStringExtra(SshHomeActivity.EXTRA_SSH_KEY);
+        File ssh = new File(TermuxConstants.TERMUX_PREFIX_DIR_PATH, "bin/ssh");
+        if (!ssh.isFile() || !ssh.canExecute()) {
+            Toast.makeText(this, "OpenSSH is not installed. Run 'pkg install openssh' in the local terminal.", Toast.LENGTH_LONG).show();
+            return false;
+        }
+
+        java.util.ArrayList<String> arguments = new java.util.ArrayList<>();
+        arguments.add("-p");
+        arguments.add(String.valueOf(port));
+        if (keyPath != null && !keyPath.trim().isEmpty()) {
+            arguments.add("-i");
+            arguments.add(keyPath.trim());
+        }
+        arguments.add(username + "@" + host);
+        com.termux.shared.termux.shell.command.runner.terminal.TermuxSession session = mTermuxService.createTermuxSession(
+            ssh.getAbsolutePath(), arguments.toArray(new String[0]), null,
+            mProperties.getDefaultWorkingDirectory(), false,
+            intent.getStringExtra(SshHomeActivity.EXTRA_SSH_HOST));
+        if (session == null) {
+            Toast.makeText(this, "Could not start the SSH session", Toast.LENGTH_LONG).show();
+            return false;
+        }
+        mTermuxTerminalSessionActivityClient.setCurrentSession(session.getTerminalSession());
+        return true;
     }
 
     @Override
